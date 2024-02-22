@@ -1,0 +1,499 @@
+---
+title: "Practicum I CS5200"
+author: "Yawen Chi"
+email: "chi.yaw@northeastern.edu"
+date: "Fall 2023"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+---
+
+```{r Load library}
+library(RMySQL)
+```
+## Connect to Database
+```{r Connect to db}
+db_name_fh <- "sql12655763"
+db_user_fh <- "sql12655763"
+db_host_fh <- "sql12.freemysqlhosting.net"
+db_pwd_fh <- "RyRdNuV3il"
+db_port_fh <- 3306
+
+# 3. Connect to remote server database
+mydb.fh <-  dbConnect(RMySQL::MySQL(), user = db_user_fh, password = db_pwd_fh,
+                      dbname = db_name_fh, host = db_host_fh, port = db_port_fh)
+
+mydb <- mydb.fh
+```
+## Create Database
+```{sql drop strikes, connection=mydb}
+drop table if exists strikes
+```
+```{sql drop conditions, connection=mydb}
+drop table if exists conditions
+```
+```{sql drop flights, connection=mydb}
+drop table if exists flights
+```
+```{sql drop airports, connection=mydb}
+drop table if exists airports
+```
+### Create airports table
+```{sql create airports table, connection=mydb}
+CREATE TABLE airports (
+  aid INTEGER AUTO_INCREMENT PRIMARY KEY,
+  airportName TEXT,
+  airportState TEXT(225),
+  airportCode TEXT NULL
+);
+```
+### Create flights table
+```{sql create flights table, connection=mydb}
+CREATE TABLE flights (
+  fid INTEGER NOT NULL AUTO_INCREMENT,
+  date DATE,
+  origin INTEGER,
+  airline TEXT,
+  aircraft TEXT,
+  altitude NUMERIC CHECK (altitude >= 0),
+  heavy BOOLEAN NULL,
+  PRIMARY KEY (fid),
+  FOREIGN KEY (origin) REFERENCES airports(aid)
+);
+```
+### Create conditions table
+```{sql create conditions table, connection=mydb}
+CREATE TABLE conditions (
+  cid INTEGER AUTO_INCREMENT PRIMARY KEY,
+  sky_condition TEXT NOT NULL,
+  explanation TEXT
+);
+```
+### Create strikes table
+```{sql Create strikes table, connection=mydb}
+CREATE TABLE strikes (
+  sid INTEGER AUTO_INCREMENT PRIMARY KEY,
+  fid INTEGER,
+  numbirds INTEGER,
+  impact TEXT,
+  damage BOOLEAN,
+  altitude INTEGER CHECK (altitude >= 0),
+  conditions INTEGER,
+  FOREIGN KEY (conditions) REFERENCES conditions(cid),
+  FOREIGN KEY (fid) REFERENCES flights(fid)
+);
+```
+## For checking only not evaluated 
+```{sql connection=mydb, eval=F}
+insert into airports(aid, airportName, airportState, airportCode)
+values(1, "SEA-TAC International airport", "Washington", "SEA")
+```
+
+```{sql connection=mydb, eval=F}
+insert into flights(fid, date, origin, airline, aircraft, altitude, heavy)
+values(2, "2022-10-10", 1, "EVA", "Airplane", 9999, TRUE)
+```
+```{sql connection=mydb, eval=F}
+insert into conditions(cid, sky_condition, explanation)
+values(1, "No Cloud", "FLT 753. PILOT REPTD A HUNDRED BIRDS ON UNKN TYPE. #1 ENG WAS SHUT DOWN AND DIVERTED TO EWR. SLIGHT VIBRATION. A/C WAS OUT OF SVC FOR REPAIRS TO COWLING, FAN DUCT ACCOUSTIC PANEL. INGESTION. DENTED FAN BLADE #26 IN #1 ENG. HEAVY BLOOD STAINS ON L WINGTIP")
+```
+```{sql connection=mydb, eval=F}
+insert into strikes(sid, fid, numbirds, impact, damage, altitude, conditions)
+values(1, 2, 2, "Engine Shut Down", TRUE, 9999, 1)
+```
+
+```{sql connection=mydb, eval=F}
+select * from flights
+```
+```{sql connection=mydb, eval=F}
+select * from airports
+```
+```{sql connection=mydb, eval=F}
+select * from conditions
+```
+```{sql connection=mydb, eval=F}
+select * from strikes
+```
+## Load the CSV file into a DataFrame
+```{r Load csv file into data frame}
+bds.raw <- read.csv("BirdStrikesData-V2.csv")
+head(bds.raw)
+```
+## Create data frame df.airports
+```{r Create data frame df.airports}
+options(sqldf.driver = 'SQLite')
+
+df.airports <- sqldf::sqldf("select distinct 1 as aid, airport as airportName, origin as airportState, NULL as airportCode from `bds.raw`")
+
+
+n.airports <- nrow(df.airports)
+df.airports[,1] <- seq(1, n.airports)
+
+
+head(df.airports)
+```
+## Create data frame df.flights
+```{r Create data frame df.flights}
+df.flights <- sqldf::sqldf("SELECT
+  1 AS fid,
+  rid AS lookup_id,
+  flight_date AS date,
+  airport AS origin,
+  CASE
+    WHEN not airline is not null THEN 'unknown'
+    ELSE replace(trim(airline), '*', '')
+  END AS airline,
+  CASE
+    WHEN not aircraft is not null THEN 'unknown'
+    ELSE aircraft
+  END AS aircraft,
+  altitude_ft AS altitude,
+  CASE
+    WHEN lower(trim(heavy_flag)) == 'yes' THEN 1
+    ELSE 0
+  END AS heavy
+FROM `bds.raw`;
+")
+
+n.flights <- nrow(df.flights)
+df.flights[,1] <- seq(1, n.flights)
+
+
+head(df.flights)
+```
+## Create data frame df.conditions
+```{r  Create data frame df.conditions}
+df.conditions <- sqldf::sqldf("select distinct 1 as cid, sky_conditions as sky_condition, NULL as explanation from `bds.raw`")
+
+
+n.conditions <- nrow(df.conditions)
+df.conditions[,1] <- seq(1, n.conditions)
+
+
+head(df.conditions)
+```
+## Create data frame df.strikes
+```{r Create data frame df.strikes}
+## Create data frame df.strikes
+df.strikes <- sqldf::sqldf("SELECT
+  1 AS sid,
+  rid AS check_id,
+  wildlife_struck AS numbirds,
+  impact AS impact,
+  altitude_ft AS altitude,
+  CASE
+    WHEN lower(trim(damage)) == 'caused damage' THEN 1
+    ELSE 0
+  END AS damage,
+  sky_conditions AS conditions
+FROM `bds.raw`;
+")
+
+n.strikes <- nrow(df.strikes)
+df.strikes[,1] <- seq(1, n.strikes)
+
+
+head(df.strikes)
+```
+
+## clean up tables to avoid constraint failure
+```{sql connection=mydb}
+drop table if exists strikes
+```
+```{sql connection=mydb}
+drop table if exists conditions
+```
+```{sql connection=mydb}
+drop table if exists flights
+```
+```{sql connection=mydb}
+drop table if exists airports
+```
+
+## Bulk load data into conditions
+```{r Bulk load data into conditions}
+dbWriteTable(mydb, "conditions", df.conditions, overwrite = T, row.names=FALSE)
+```
+## Add constraints to tables
+```{sql add primary key constraint, connection=mydb}
+ALTER TABLE conditions
+MODIFY cid INT AUTO_INCREMENT,
+ADD PRIMARY KEY (cid);
+```
+## Check tables
+```{sql connection=mydb}
+select * from conditions
+```
+## Bulk load data into airports table
+```{r Bulk load data into airports table}
+dbWriteTable(mydb, "airports", df.airports, overwrite = T, row.names=FALSE)
+```
+## Add constraint for primary key
+```{sql Add constraint for primary key for airports, connection=mydb}
+ALTER TABLE airports
+MODIFY aid INT AUTO_INCREMENT,
+ADD PRIMARY KEY (aid);
+```
+
+
+## Check airports table
+```{sql Check null values in airports, connection=mydb}
+select airportName, count(*) from airports where airportName = ""
+```
+## Bulk load data into temp_flights
+```{r  Bulk load data into temp_flights}
+dbWriteTable(mydb, "temp_flights", df.flights, overwrite = T, row.names=FALSE)
+```
+
+```{sql connection=mydb}
+drop table if exists flights
+```
+```{sql Check temp_flights, connection=mydb}
+select * from temp_flights limit 10
+```
+
+## Insert data from temp_flight into flight with origin as fk reference airports aid
+```{sql Transfer flights table, connection=mydb}
+-- Create a new table
+CREATE TABLE flights AS
+SELECT
+  fid AS fid,
+  STR_TO_DATE(date, '%m/%d/%y') AS date,
+  CASE
+    WHEN CAST(REPLACE(altitude, ',', '') AS SIGNED) >= 0 THEN CAST(REPLACE(altitude, ',', '') AS SIGNED)
+    ELSE NULL
+  END AS altitude,
+  CASE
+    WHEN origin = '' OR origin IS NULL THEN -1
+    ELSE (SELECT aid FROM airports WHERE airportName = origin)
+  END AS origin,
+  CASE
+    WHEN airline = '' THEN 'unknown'
+    ELSE airline
+  END AS airline,
+  CASE
+    WHEN aircraft = '' THEN 'unknown'
+    ELSE REPLACE(aircraft, '"', '')
+  END AS aircraft,
+  heavy AS heavy
+FROM temp_flights;
+```
+## Add constraints to flights
+```{sql Primary key constraint for flights, connection=mydb}
+ALTER TABLE flights
+MODIFY fid INT AUTO_INCREMENT,
+ADD PRIMARY KEY (fid);
+```
+
+```{sql Non-negative value check for altitude, connection=mydb}
+ALTER TABLE flights
+ADD CONSTRAINT altitude_check CHECK (altitude >= 0);
+```
+## Check flights table
+```{sql Check flights table, connection=mydb}
+select * from flights limit 100
+```
+```{sql connection=mydb}
+drop table if exists strikes
+```
+## Bulk load data into temp_strikes
+```{r Bulk load data into temp_strikes}
+dbWriteTable(mydb, "temp_strikes", df.strikes, overwrite = T, row.names=FALSE)
+```
+
+## Insert data from temp_strikes into strikes with fid and condition as fk reference flight fid and condition cid
+```{sql Transfer data into strikes table, connection=mydb}
+-- Create a new table
+CREATE TABLE strikes AS
+SELECT
+  sid AS sid,
+  (SELECT fid FROM temp_flights WHERE check_id = lookup_id) AS fid,
+  numbirds AS numbirds,
+  impact AS impact,
+  damage AS damage,
+  altitude AS altitude,
+  (SELECT cid FROM conditions WHERE sky_condition = conditions) AS conditions
+FROM temp_strikes;
+```
+
+```{sql primary key constraint for strikes, connection=mydb}
+ALTER TABLE strikes
+MODIFY sid INT AUTO_INCREMENT,
+ADD PRIMARY KEY (sid);
+```
+## Check strikes table
+```{sql Check strikes table, connection=mydb}
+SELECT * FROM strikes LIMIT 100
+```
+## Drop temp_strikes table
+```{sql connection=mydb}
+DROP TABLE IF EXISTS temp_strikes
+```
+## Drop temp_flights table
+```{sql connection=mydb}
+DROP TABLE IF EXISTS temp_flights
+```
+## The top 10 states with the greatest number of bird strike incidents
+```{sql connection=mydb}
+SELECT
+  a.airportState AS state,
+  COUNT(s.sid) AS num_incidents
+FROM
+  strikes AS s
+  JOIN flights AS f ON s.fid = f.fid
+  JOIN airports AS a ON f.origin = a.aid
+GROUP BY
+  state
+ORDER BY
+  num_incidents DESC
+LIMIT 10;
+
+```
+## The airlines that had an above average number bird strike incidents.
+```{sql connection=mydb}
+SELECT
+  airline AS airline_name,
+  COUNT(s.sid) AS num_incidents
+FROM
+  strikes AS s
+  JOIN flights AS f ON s.fid = f.fid
+GROUP BY
+  airline_name
+HAVING
+  num_incidents > (
+    SELECT AVG(incident_count)
+    FROM (
+      SELECT COUNT(sid) AS incident_count
+      FROM strikes
+      GROUP BY fid
+    ) AS avg_count
+  )
+ORDER BY
+  num_incidents DESC;
+
+```
+## the (total) number of birds that struck aircraft by month
+```{sql connection=mydb}
+SELECT
+    DATE_FORMAT(date, '%m') AS month,
+    SUM(numbirds) AS total_birds_struck
+FROM
+    strikes
+    JOIN flights ON strikes.fid = flights.fid
+GROUP BY
+    month
+ORDER BY
+    month;
+
+```
+```{r}
+result <- dbGetQuery(mydb, "
+    SELECT
+        DATE_FORMAT(date, '%m') AS month,
+        SUM(numbirds) AS total_birds_struck
+    FROM
+        strikes
+        JOIN flights ON strikes.fid = flights.fid
+    GROUP BY
+        month
+    ORDER BY
+        month
+")
+
+# Display the first six rows of the dataframe
+head(result)
+```
+```{r}
+
+# Create the column chart
+barplot(result$total_birds_struck, names.arg = result$month, xlab = "Month", ylab = "Number of Birds",
+        main = "Number of Birds Striking Aircraft by Month",
+        col = "pink", border = "black", cex.names = 0.8)
+
+# Add data labels above the bars
+text(x = 1:length(result$month), y = (result$total_birds_struck), labels = result$total_birds_struck,
+     pos = 4, cex = 0.6)
+
+
+
+
+```
+```{sql connection=mydb}
+drop PROCEDURE if exists AddBirdStrike
+```
+```{sql connection=mydb}
+CREATE PROCEDURE AddBirdStrike(
+    IN numBirdS INT,
+    IN airport_name TEXT,
+    IN airport_state TEXT,
+    IN impact TEXT,
+    IN damage BOOLEAN,
+    IN altitude INT,
+    IN `condition` TEXT,
+    IN strike_date DATE,
+    IN airline TEXT,
+    IN aircraft TEXT,
+    IN heavy BOOLEAN
+)
+BEGIN
+    DECLARE aid INT;
+    DECLARE fid INT;
+    DECLARE cid INT;
+    
+    -- Check if the airport exists, and if not, insert a new airport
+    SELECT distinct aid INTO aid FROM airports WHERE airportName = airport_name AND airportState = airport_state;
+    
+    IF aid IS NULL THEN
+        INSERT INTO airports (airportName, airportState) VALUES (airport_name, airport_state);
+        SET aid = LAST_INSERT_ID();
+    END IF;
+    
+    -- Insert a new flight or use an existing one
+    SELECT distinct fid INTO fid FROM flights WHERE origin = aid AND date = strike_date AND airline = airline AND aircraft = aircraft AND altitude = altitude AND heavy = heavy;
+    
+    IF fid IS NULL THEN
+        INSERT INTO flights (origin, date, airline, aircraft, altitude, heavy)
+        VALUES (aid, strike_date, airline, aircraft, altitude, heavy);
+        SET fid = LAST_INSERT_ID();
+    END IF;
+    
+    -- Check if the condition exists, and if not, insert a new condition
+    SELECT distinct cid INTO cid FROM conditions WHERE sky_condition = `condition`;
+    
+    IF cid IS NULL THEN
+        INSERT INTO conditions (sky_condition) VALUES (`condition`);
+        SET cid = LAST_INSERT_ID();
+    END IF;
+    
+    -- Insert the bird strike incident
+    INSERT INTO strikes (numbirds, fid, impact, damage, altitude, conditions)
+    VALUES (numBirdS, fid, impact, damage, altitude, cid);
+END;
+
+
+
+
+```
+
+```{sql connection=mydb}
+CALL AddBirdStrike(5201314, 'LAGUARDIA NY', 'New York', 'None', 0, 550, 'Rain', '2022-03-04', 'EVA', 'Airplane', 1);
+
+
+```
+```{sql connection=mydb}
+select * from conditions
+```
+
+```{sql connection=mydb}
+SELECT * FROM strikes
+order by sid desc limit 10
+```
+
+```{r}
+dbDisconnect(mydb)
+```
+
+
+
